@@ -13,11 +13,17 @@ const Home = () => {
 		fileList: [],
 		progressList: [],
 		select: 'text',
-		sessionId: sha1(new Date().toString() + Math.random(100000))
+		allowCancel: true
 	})
 
+	const { fileList, progressList, select, allowCancel } = state
+
+	const isCancelledRef = React.useRef(false)
+	const currentIntervalRef = React.useRef(null)
+	const currentConvertFileRef = React.useRef(0)
+
 	const dummyRequest = async ({ file, onSuccess }) => {
-		const newProgressList = [...state.progressList]
+		const newProgressList = [...progressList]
 		newProgressList.push(25)
 		setState({ ...state, progressList: newProgressList })
 
@@ -44,111 +50,160 @@ const Home = () => {
 	}
 
 	const isAnyFileNotReady = () => {
-		return state.fileList.length === 0 || state.fileList.some(isCurrentFileNotReady)
+		return fileList.length === 0 || fileList.some(isCurrentFileNotReady)
+	}
+
+	const isAnyFileConverting = () => {
+		return fileList.some(file => file.status === 'converting')
 	}
 
 	const getRemoveFunc = i => () => {
-		if (isCurrentFileNotReady(state.fileList[i])) {
+		if (isCurrentFileNotReady(fileList[i])) {
 			return
 		}
 
-		const newFileList = [...state.fileList]
+		const newFileList = [...fileList]
+		const newProgressList = [...progressList]
 		newFileList.splice(i, 1)
-		const newProgressList = [...state.progressList]
 		newProgressList.splice(i, 1)
 		setState({ ...state, fileList: newFileList, progressList: newProgressList })
+		currentConvertFileRef.current = 0
 	}
 
 	const handleSelectChange = e => {
 		setState({ ...state, select: e.target.value })
 	}
 
+	const delaySetState = ({ newState, time }) => {
+		setTimeout(() => {
+			setState(newState)
+		}, time)
+	}
+
+	const findUnconvertedOrErrorFile = () => {
+		return fileList.findIndex(file => !file.downloadBlob)
+	}
+
 	const convert = async () => {
-		for (let i = 0; i < state.fileList.length; i++) {
-			const newFileList = [...state.fileList]
-			const newProgressList = [...state.progressList]
-			newFileList[i].status = 'converting'
-			newFileList[i].convertError = false
-			newProgressList[i] = 0
+		setState({ ...state, allowCancel: true })
+		isCancelledRef.current = false
+		const currentFileInd = currentConvertFileRef.current
 
-			setState({ ...state, fileList: newFileList, progressList: newProgressList })
+		const extensionMapper = {
+			text: '.txt',
+			file: '.docx'
+		}
 
-			const formData = new FormData()
+		// file already converted
+		if (
+			fileList[currentFileInd]?.downloadBlob &&
+			fileList[currentFileInd].returnType === extensionMapper[select]
+		) {
+			const nextFileToConvert = findUnconvertedOrErrorFile()
+			if (nextFileToConvert !== -1) {
+				currentConvertFileRef.current = nextFileToConvert
+				convert()
+			}
+			return
+		}
 
-			formData.append('file', newFileList[i].originFileObj)
-			formData.append('session_id', state.sessionId)
-			formData.append('return_type', state.select)
+		// change type of return file then re-convert all files
+		if (fileList[currentFileInd].returnType !== extensionMapper[select]) {
+			currentConvertFileRef.current = 0
+		}
 
-			try {
-				await axios.post('http://124.158.1.125:9815/upload_ocr_scan', formData)
+		// set file status to converting
+		const newFileList = [...fileList]
+		const newProgressList = [...progressList]
+		newFileList[currentFileInd].status = 'converting'
+		newFileList[currentFileInd].convertError = false
+		newFileList[currentFileInd].downloadBlob = null
+		newProgressList[currentFileInd] = 0
+		setState({ ...state, fileList: newFileList, progressList: newProgressList })
 
-				formData.delete('file')
-				const returnType = formData.get('return_type')
-				formData.delete('return_type')
+		const sessionId = sha1(new Date().toString() + Math.random(100000))
+		const formData = new FormData()
+		formData.append('file', newFileList[currentFileInd].originFileObj)
+		formData.append('session_id', sessionId)
+		formData.append('return_type', select)
 
-				const intervalId = setInterval(async () => {
-					const response = await axios.post('http://124.158.1.125:9815/process_background', formData)
+		try {
+			await axios.post('http://124.158.1.125:9815/upload_ocr_scan', formData)
 
-					newProgressList[i] = Math.floor(response.data)
-					setState({ ...state, progressList: [...newProgressList] })
+			formData.delete('file')
+			const returnType = formData.get('return_type')
+			formData.delete('return_type')
 
-					if (newProgressList[i] === 100) {
-						clearInterval(intervalId)
+			currentIntervalRef.current = setInterval(async () => {
+				const response = await axios.post('http://124.158.1.125:9815/process_background', formData)
 
-						formData.append('return_type', returnType)
-						const res = await axios.post('http://124.158.1.125:9815/process_background', formData, {
-							responseType: 'blob'
-						})
+				newProgressList[currentFileInd] = Math.floor(response.data)
+				setState({ ...state, progressList: [...newProgressList] })
 
-						const extensionMapper = {
-							text: '.txt',
-							file: '.docx'
-						}
+				if (newProgressList[currentFileInd] === 100) {
+					clearInterval(currentIntervalRef.current)
 
-						newFileList[i] = {
-							...newFileList[i],
+					formData.append('return_type', returnType)
+					const res = await axios.post('http://124.158.1.125:9815/process_background', formData, {
+						responseType: 'blob'
+					})
+
+					if (!isCancelledRef.current) {
+						setState({ ...state, allowCancel: false })
+
+						newFileList[currentFileInd] = {
+							...newFileList[currentFileInd],
 							status: 'done',
 							returnType: extensionMapper[returnType],
 							downloadBlob: res.data
 						}
 
-						setTimeout(() => {
-							setState({
-								...state,
-								fileList: [...newFileList],
-								sessionId: sha1(new Date().toString() + Math.random(100000))
-							})
-						}, 500)
+						delaySetState({ newState: { ...state, fileList: [...newFileList] }, time: 500 })
+						// if successfully converted -> convert next file
+						if (currentConvertFileRef.current + 1 < fileList.length) {
+							currentConvertFileRef.current++
+							convert()
+						}
 					}
-				}, 1000)
-			} catch (error) {
-				newProgressList[i] = Math.random() * 81
-				newFileList[i].convertError = true
-				setState({
-					...state,
-					fileList: [...newFileList],
-					progressList: [...newProgressList]
-					// sessionId: sha1(new Date().toString() + Math.random(100000))
-				})
-
-				if (error.response) {
-					message.error(error.response.data.message, 5)
-				} else {
-					message.error('Có lỗi đã xảy ra. Vui lòng thử lại sau', 5)
-					console.log(error)
 				}
+			}, 1000)
+		} catch (error) {
+			newProgressList[currentFileInd] = Math.random() * 81
+			newFileList[currentFileInd].convertError = true
+			setState({
+				...state,
+				fileList: [...newFileList],
+				progressList: [...newProgressList]
+			})
 
-				setTimeout(() => {
-					newFileList[i].status = 'done'
-					setState({ ...state, fileList: [...newFileList] })
-				}, 800)
+			if (error.response) {
+				message.error(error.response.data.message, 5)
+			} else {
+				message.error('Có lỗi đã xảy ra. Vui lòng thử lại sau', 5)
+				console.log(error)
 			}
+
+			newFileList[currentFileInd].status = 'done'
+			delaySetState({ newState: { ...state, fileList: [...newFileList] }, time: 800 })
+		}
+	}
+
+	const cancelConvert = () => {
+		if (allowCancel) {
+			clearInterval(currentIntervalRef.current)
+			const newFileList = [...fileList]
+			newFileList[currentConvertFileRef.current].status = 'done'
+			setState({ ...state, isCancelled: true })
 		}
 	}
 
 	const getDownloadFunc = i => () => {
-		const file = state.fileList[i]
+		const file = fileList[i]
 		saveAs(file.downloadBlob, `${file.name.slice(0, -4)}${file.returnType}`)
+	}
+
+	const isCurrentFileConverted = () => {
+		return fileList.length > 0 && fileList[currentConvertFileRef.current].downloadBlob ? true : false
 	}
 
 	return (
@@ -169,17 +224,17 @@ const Home = () => {
 						accept=".jpg,.jpeg,.png,.pdf"
 						className="home-page-drop-zone"
 						onChange={handleChange}
-						fileList={state.fileList}
+						fileList={fileList}
 						customRequest={dummyRequest}
 						showUploadList={false}
 						maxCount={1}
-						style={state.fileList.length === 0 ? {} : { visibility: 'hidden', pointerEvents: 'none' }}
+						style={fileList.length === 0 ? {} : { visibility: 'hidden', pointerEvents: 'none' }}
 					>
 						<p className="home-page-drop-zone__hint">Định dạng hỗ trợ gồm JPG, JPEG, PNG, PDF</p>
 					</Upload.Dragger>
 
 					<div className="home-page-file-list">
-						{state.fileList.map((file, i) => (
+						{fileList.map((file, i) => (
 							<div key={file.uid} className="home-page-file-list-card">
 								{file.status === 'done' || file.status === 'converting' ? (
 									<>
@@ -210,21 +265,21 @@ const Home = () => {
 											file.convertError ? (
 												<Progress
 													className="home-page-file-list-card__progress"
-													percent={state.progressList[i]}
+													percent={progressList[i]}
 													size="small"
 													status="exception"
 												/>
 											) : (
 												<Progress
 													className="home-page-file-list-card__progress"
-													percent={state.progressList[i]}
+													percent={progressList[i]}
 													size="small"
 												/>
 											)
 										) : null}
 									</>
 								) : file.status === 'uploading' ? (
-									<Progress percent={state.progressList[i]} size="small" />
+									<Progress percent={progressList[i]} size="small" />
 								) : null}
 							</div>
 						))}
@@ -232,16 +287,22 @@ const Home = () => {
 				</div>
 
 				<div className="home-page-select">
-					<select onChange={handleSelectChange} value={state.select}>
+					<select onChange={handleSelectChange} value={select}>
 						<option value="text">Text</option>
 						<option value="file">File</option>
 					</select>
 				</div>
 
 				<div className="home-page-convert">
-					<Button type="primary" onClick={convert} disabled={isAnyFileNotReady()}>
-						Chuyển đổi
-					</Button>
+					{fileList.length > 0 && isAnyFileNotReady() && isAnyFileConverting() ? (
+						<Button type="danger" onClick={cancelConvert} disabled={isCurrentFileConverted() || !allowCancel}>
+							Hủy
+						</Button>
+					) : (
+						<Button type="primary" onClick={convert} disabled={isAnyFileNotReady()}>
+							Chuyển đổi
+						</Button>
+					)}
 				</div>
 			</div>
 		</SiteLayout>

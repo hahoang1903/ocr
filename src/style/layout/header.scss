@@ -1,0 +1,8 @@
+.header {
+	background-color: $color-white;
+
+	&-logo > img {
+		width: 16.25rem;
+		max-width: 100%;
+	}
+}

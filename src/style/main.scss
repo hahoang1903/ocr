@@ -1,0 +1,8 @@
+@import './base/variables';
+@import './base/reset';
+@import './base/mixins';
+
+@import './layout/header';
+@import './layout/layout';
+
+@import './pages/home.scss';

@@ -4,3 +4,21 @@
 	transform: translateX(-50%);
 	position: absolute;
 }
+
+@mixin object-fit-img {
+	border-radius: 0.5rem;
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+}
+
+@mixin navigation-button {
+	font-size: 1rem;
+	font-weight: bold;
+	color: black;
+	transition-duration: 0.15s;
+
+	&:hover {
+		color: $color-cerulean;
+	}
+}

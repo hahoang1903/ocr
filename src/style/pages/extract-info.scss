@@ -1,0 +1,5 @@
+.extract-info {
+	&-img {
+		@include object-fit-img;
+	}
+}

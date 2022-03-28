@@ -1,8 +1,93 @@
 .header {
 	background-color: $color-white;
+	display: flex;
+	position: relative;
 
-	&-logo > img {
-		width: 16.25rem;
-		max-width: 100%;
+	&-logo {
+		&--full {
+			width: 16.25rem;
+			max-width: 100%;
+		}
+
+		&--short {
+			display: none;
+			width: 3.5rem;
+			max-width: 100%;
+		}
+	}
+
+	&-links {
+		font-family: Montserrat, sans-serif;
+		display: flex;
+		flex: 1 1 auto;
+		align-items: center;
+		justify-content: flex-end;
+
+		& button {
+			@include navigation-button;
+		}
+	}
+
+	&-menu {
+		&-item.ant-menu-item-active button,
+		&-item.ant-menu-item-selected button {
+			color: $color-cerulean !important;
+		}
+
+		&-btn {
+			@include navigation-button;
+			font-weight: normal;
+			font-size: 0.9rem;
+		}
+	}
+
+	&-hamburger {
+		display: none;
+		font-size: 1.5rem;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+	}
+}
+
+@media (max-width: 750px) {
+	.header {
+		&-logo {
+			width: 100%;
+			text-align: center;
+		}
+
+		&-links {
+			display: none;
+		}
+
+		&-hamburger {
+			display: flex;
+		}
+	}
+}
+
+@media (max-width: 520px) {
+	.header {
+		padding: 0 1.5rem;
+		&-logo {
+			&--full {
+				display: none;
+			}
+
+			&--short {
+				display: inline;
+			}
+		}
+	}
+}
+
+@media (max-width: 300px) {
+	.header {
+		padding: 0 1rem;
+
+		&-hamburger {
+			font-size: 1.25rem;
+		}
 	}
 }
